@@ -1,0 +1,7 @@
+# build product
+build/
+out/
+
+# runtime product
+log/
+*.log
