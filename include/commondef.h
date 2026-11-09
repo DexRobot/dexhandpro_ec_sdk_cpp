@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <string>
 
-#ifdef WIN32
+#if defined(_WIN32)
 #define EXPORT_API_DX21 __declspec(dllexport)
 #define IMPORT_API_DX21 __declspec(dllimport)
 
@@ -22,6 +22,14 @@
 
 namespace DexRobot
 {
+enum class handCtrlMode: uint8_t
+{
+    ZERO_TORQUE_MODE = 0x00,
+
+    JOINT_POS_MODE = 0x04,
+    THREE_LOOP_MODE = 0x06,
+    MIT_CTRL_MODE = 0x07,
+};
 
 // Log levels. Order must match DexLibCommon.
 enum class LOG_LEVEL
@@ -57,6 +65,9 @@ enum class SysErrorCode
     UPGRADE_FAILED,
     MAINTENANCE_BUSY,
     INTERNAL,
+    FIRMWARE_UPGRADE_REQUIRED,
+    MODE_CONFLICT,
+    MODE_NOT_SET,
 };
 
 // Failure attribution.
@@ -103,9 +114,33 @@ enum class AdapterType : int
 enum class PdoVersion : uint8_t
 {
     UNKNOWN = 0,
-    V1_0 = 1,
     V1_1 = 2,
 };
+
+// Pusher PDO fields. Bit order defines PusherState::mapped.
+enum class PusherField : uint32_t
+{
+    Statusword  = 0,    // 0x6041
+    ModeDisplay = 1,    // 0x6061
+    Position    = 2,    // 0x6064
+    Velocity    = 3,    // 0x606C
+    Torque      = 4,    // 0x6077
+    Current     = 5,    // 0x6078
+    Force       = 6,    // 0x300A
+    DcLinkVolt  = 7,    // 0x6079
+    FollowErr   = 8,    // 0x60F4
+    ErrorCode   = 9,    // 0x603F
+    AlarmBits   = 10,   // 0x2201
+    DriveTemp1  = 11,   // 0x3004
+    DriveTemp2  = 12,   // 0x3005
+    MotorTemp1  = 13,   // 0x3006
+    MotorTemp2  = 14,   // 0x3007
+};
+
+[[nodiscard]] inline constexpr uint32_t pusherFieldBit(const PusherField field) noexcept
+{
+    return 1u << static_cast<uint32_t>(field);
+}
 
 }   // namespace Dex021
 
@@ -148,6 +183,9 @@ inline const char* toString(const SysErrorCode code)
         case SysErrorCode::UPGRADE_FAILED:           return "UPGRADE_FAILED";
         case SysErrorCode::MAINTENANCE_BUSY:         return "MAINTENANCE_BUSY";
         case SysErrorCode::INTERNAL:                 return "INTERNAL";
+        case SysErrorCode::FIRMWARE_UPGRADE_REQUIRED: return "FIRMWARE_UPGRADE_REQUIRED";
+        case SysErrorCode::MODE_CONFLICT:            return "MODE_CONFLICT";
+        case SysErrorCode::MODE_NOT_SET:             return "MODE_NOT_SET";
     }
 
     return "UNKNOWN";

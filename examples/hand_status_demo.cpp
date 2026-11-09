@@ -25,7 +25,6 @@ const char* versionName(const PdoVersion version)
 {
     switch (version)
     {
-        case PdoVersion::V1_0: return "V1.0";
         case PdoVersion::V1_1: return "V1.1";
         default:               return "unknown";
     }
@@ -43,21 +42,23 @@ const char* moduleName(const HandModule module)
 
 DexHand::PTR createHand()
 {
-    const std::vector<std::string> interfaces = DexHand::scanDexInterfaces(AdapterType::EC_SOEM);
+    const std::vector<InterfaceInfo> interfaces = DexHand::scanDexInterfaces(AdapterType::EC_SOEM);
     if (interfaces.empty())
     {
         std::printf("No adapter with EtherCAT slaves found.\n"
                     "  - check the hand is powered and the cable is connected\n"
-                    "  - if windows plwase check Npcap is installed with WinPcap API compatible mode\n"
+                    "  - if windows please check Npcap is installed with WinPcap API compatible mode\n"
                     "  - if ubuntu please run this program as Administrator\n");
         return nullptr;
     }
 
-    std::printf("adapter: %s\n", interfaces.front().c_str());
+    std::printf("adapter: %s (%s)\n",
+                interfaces.front().name.c_str(),
+                interfaces.front().description.c_str());
 
     DexHand::PTR hand = DexHand::createInstance(ProductType::DX021_PRO,
                                                 AdapterType::EC_SOEM,
-                                                interfaces.front());
+                                                interfaces.front().name);
     if (!hand)
         std::printf("createInstance failed.\n");
 
@@ -67,9 +68,9 @@ DexHand::PTR createHand()
 void printHandInfo(DexHand& hand)
 {
     HandInfo info{};
-    if (!hand.handInfo(info))
+    if (!hand.getHandInfo(info))
     {
-        std::printf("handInfo failed: %s\n", hand.errorMessage().c_str());
+        std::printf("getHandInfo failed: %s\n", hand.errorMessage().c_str());
         return;
     }
 
@@ -106,6 +107,28 @@ void printJoints(const DX21StatusRxData& status)
     printGroup("middle", 7,  9);
     printGroup("ring",  10, 12);
     printGroup("little",13, 15);
+}
+
+void printDistalSensors(const DX21StatusRxData& status)
+{
+    static const JointId joints[] = {
+        JointId::IndexDistCoupled,
+        JointId::MiddleDistCoupled,
+        JointId::RingDistCoupled,
+        JointId::LittleDistCoupled,
+    };
+
+    std::printf("four-finger distal sensors (deg):\n");
+    for (const JointId id : joints)
+    {
+        const JointState s = status.joint(id);
+        std::printf("  joint %2d: total=%7.2f primary=%7.2f follower=%7.2f hasFollower=%d\n",
+                    static_cast<int>(id),
+                    s.angle / 100.0,
+                    s.anglePrimary / 100.0,
+                    s.angleFollower / 100.0,
+                    s.hasFollower ? 1 : 0);
+    }
 }
 
 }   // namespace
@@ -145,6 +168,7 @@ int main()
     {
         std::printf("joint angles (deg):\n");
         printJoints(*status);
+        printDistalSensors(*status);
     }
     else
     {

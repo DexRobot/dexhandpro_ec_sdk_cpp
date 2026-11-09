@@ -1,6 +1,5 @@
 //
-// hand_admin_demo.cpp - read EtherCAT board information, device information
-// and protection temperature through SDO.
+// hand_sdo_demo.cpp - read EtherCAT board and device information through SDO.
 //
 // This example is read-only and does not drive the motors.
 //
@@ -32,12 +31,12 @@ const char* partName(const FingerPart part)
 {
     switch (part)
     {
-        case FingerPart::ThumbDistal:        return "thumb-distal";
-        case FingerPart::ThumbBase:          return "thumb-base";
-        case FingerPart::IndexMcp:           return "index-mcp";
-        case FingerPart::MiddleMcp:          return "middle-mcp";
-        case FingerPart::RingMcp:            return "ring-mcp";
-        case FingerPart::LittleMcp:          return "little-mcp";
+        case FingerPart::ThumbDist:          return "thumb-distal";
+        case FingerPart::ThumbProx:          return "thumb-prox";
+        case FingerPart::IndexProx:          return "index-prox";
+        case FingerPart::MiddleProx:         return "middle-prox";
+        case FingerPart::RingProx:           return "ring-prox";
+        case FingerPart::LittleProx:         return "little-prox";
         case FingerPart::IndexMiddleDistal:  return "index-middle-distal";
         case FingerPart::RingLittleDistal:   return "ring-little-distal";
         default:                             return "unknown";
@@ -48,28 +47,22 @@ const char* partName(const FingerPart part)
 
 int main()
 {
-    const std::vector<std::string> interfaces = DexHand::scanDexInterfaces(AdapterType::EC_SOEM);
+    const std::vector<InterfaceInfo> interfaces = DexHand::scanDexInterfaces(AdapterType::EC_SOEM);
     if (interfaces.empty())
     {
         std::printf("No adapter with EtherCAT slaves found.\n"
             "  - check the hand is powered and the cable is connected\n"
-            "  - if windows plwase check Npcap is installed with WinPcap API compatible mode\n"
+            "  - if windows please check Npcap is installed with WinPcap API compatible mode\n"
             "  - if ubuntu please run this program as Administrator\n");
         return 1;
     }
 
-    std::printf("adapter: %s\n", interfaces.front().c_str());
+    std::printf("adapter: %s (%s)\n",
+                interfaces.front().name.c_str(),
+                interfaces.front().description.c_str());
 
-    const auto hand = std::dynamic_pointer_cast<DexHand_Pro>(
-        DexHand::createInstance(ProductType::DX021_PRO,
-                                AdapterType::EC_SOEM,
-                                interfaces.front()));
-
-    if (!hand)
-    {
-        std::printf("failed to create DexHand_Pro instance.\n");
-        return 2;
-    }
+    const auto hand = std::make_shared<DexHand_Pro>(
+        AdapterType::EC_SOEM, interfaces.front().name);
 
     if (!hand->connect(true))
     {
@@ -114,16 +107,13 @@ int main()
             continue;
         }
 
-        uint16_t protectionTemp = 0;
-        hand->readProtectionTemperature(part, protectionTemp);
-
         std::printf("  %-20s sysId=0x%04X app=%u sn=%u temp=%.2f C protect=%.2f C\n",
                     partName(part),
                     static_cast<unsigned>(info.sysId),
                     static_cast<unsigned>(info.appVer),
                     static_cast<unsigned>(info.sn),
                     info.curTemp / 100.0,
-                    protectionTemp / 100.0);
+                    info.procTemp / 100.0);
     }
 
     hand->disconnect();
