@@ -84,12 +84,6 @@ int main()
         return 5;
     }
 
-    // Clear firmware errors before motion, otherwise motor protection may block it.
-    HandCommand clearCmd;
-    clearCmd.clearError = true;
-    hand->setHandCommand(clearCmd);
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-
     HandCommand cmd;
     JointTarget& target = cmd.joints[static_cast<size_t>(kDemoJoint)];
     target.targetDeg = before.angle / 100.0f + kDeltaDeg;

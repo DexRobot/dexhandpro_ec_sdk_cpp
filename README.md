@@ -1,15 +1,15 @@
 # DexHand021Pro EtherCAT SDK 用户接口文档
 
-版本 1.0.1    2026-11-08
+版本 1.0.2    2026-11-13
 
 | **项目** | **内容**                  |
 | -------- | ------------------------- |
-| 文档版本 | 1.0.1                     |
-| 对应 SDK | `sdkVersion() == "1.0.1"` |
+| 文档版本 | 1.0.2                     |
+| 对应 SDK | `sdkVersion() == "1.0.2"` |
 | 适用产品 | DexHand021Pro             |
 | 通信方式 | EtherCAT（SOEM）          |
 | 适用固件 | 手板 EC 应用 V1.1         |
-| 更新日期 | 2026-11-08                |
+| 更新日期 | 2026-11-13                |
 
 ## 1. 文档说明
 
@@ -48,13 +48,6 @@ const char* sdkVersion();
 | 手板 0   | 拇指板（Thumb）      |
 | 手板 1   | 四指板（FourFinger） |
 
-手板使用 V1.1 PDO 布局：
-
-| **方向**            | **长度** |
-| ------------------- | -------- |
-| TxPDO（从站到主站） | 240 B    |
-| RxPDO（主站到从站） | 112 B    |
-
 SDK 对外提供 16 个语义关节：
 
 - 拇指 4 个关节
@@ -64,13 +57,13 @@ SDK 对外提供 16 个语义关节：
 
 ### 3.1 环境要求
 
-| **项目** | **要求**                                             |
-| -------- | ---------------------------------------------------- |
-| 操作系统 | Windows 10/11 x64                                    |
-| 编译器   | MSVC v143                                            |
-| C++ 标准 | C++20                                                |
-| 网络依赖 | Npcap（需单独安装，不随本 SDK 分发）                 |
-| 运行库   | Microsoft Visual C++ 2015–2022 x64 Redistributable   |
+| **项目** | **要求**                                           |
+| -------- | -------------------------------------------------- |
+| 操作系统 | Windows 10/11 x64                                  |
+| 编译器   | MSVC v143                                          |
+| C++ 标准 | C++20                                              |
+| 网络依赖 | Npcap（需单独安装，不随本 SDK 分发）               |
+| 运行库   | Microsoft Visual C++ 2015–2022 x64 Redistributable |
 
 运行前请确认：
 
@@ -79,33 +72,16 @@ SDK 对外提供 16 个语义关节：
 
 Npcap 默认仅允许管理员访问网卡，因此运行本 SDK 的程序通常需要以管理员权限启动。
 
-### 3.2 Debug / Release 配对
+### 3.2 仅提供 Release 版本
 
-SDK 的公开接口包含 C++ 标准库类型，Debug 和 Release 使用不同的 CRT 与 STL 布局。
+SDK 只提供 Release 版 `dexhandpro.dll` / `dexhandpro.lib`，不提供 Debug 版，也不提供 PDB。
 
-使用时必须遵守：
+SDK 的公开接口包含 C++ 标准库类型。MSVC 的 Debug 配置使用调试版 CRT 与 STL（`/MDd`，`_ITERATOR_DEBUG_LEVEL=2`），与 Release DLL 的 ABI 不兼容。因此：
 
-- Debug 程序链接 Debug 版 `dexhandpro.lib`，加载 Debug 版 `dexhandpro.dll`
-- Release 程序链接 Release 版 `dexhandpro.lib`，加载 Release 版 `dexhandpro.dll`
-- 不要在同一个进程内混用 Debug 和 Release 模块
-
-交付目录：
-
-```cpp
-Debug/
-  dexhandpro.dll
-  dexhandpro.lib
-  DexHand.h
-  commondef.h
-  DateTimeUtils.h
- 
-Release/
-  dexhandpro.dll
-  dexhandpro.lib
-  DexHand.h
-  commondef.h
-  DateTimeUtils.h
-```
+- 客户工程必须使用 **Release** 或 **RelWithDebInfo** 构建，二者都使用发布版 CRT（`/MD`）；
+- 通过本 SDK 的 CMake 包接入时，使用 **Debug** 配置编译会直接在 `DexHand.h` 报错并提示改用 Release/RelWithDebInfo；手动配置 include/lib 的工程请自行确保使用 `/MD`；
+- `RelWithDebInfo` 保留调试符号，可以正常调试客户自己的代码；
+- SDK 不提供 PDB，无法单步进入 SDK 内部实现。
 
 ### 3.3 初始化顺序
 
@@ -127,7 +103,7 @@ scanInterfaces / scanDexInterfaces
 SDK 根目录结构：
 
 ```text
-DexProEC_SDK/
+DexProEC_SDK_CPP/
 ├── CMakeLists.txt
 ├── docs/
 │   └── DexHand021Pro_SDK_User_Guide.pdf
@@ -137,12 +113,8 @@ DexProEC_SDK/
 │   └── DateTimeUtils.h
 ├── lib/
 │   ├── windows/
-│   │   ├── Debug/
-│   │   │   ├── dexhandpro.dll
-│   │   │   └── dexhandpro.lib
-│   │   └── Release/
-│   │       ├── dexhandpro.dll
-│   │       └── dexhandpro.lib
+│   │   ├── dexhandpro.dll
+│   │   └── dexhandpro.lib
 │   └── cmake/
 │       └── DexHandPro/
 │           └── DexHandProConfig.cmake
@@ -155,11 +127,11 @@ DexProEC_SDK/
 
 CMake 文件职责：
 
-| **文件** | **作用** |
-|---|---|
-| `CMakeLists.txt` | SDK 包 CMake 入口：检查编译环境、创建 `DexHandPro::dexhandpro` 导入目标、加入 examples、提供 `dexhandpro_deploy()`；不编译 `dexhandpro.dll` |
-| `examples/CMakeLists.txt` | 编译并链接 SDK 示例程序。从 SDK 根目录构建时复用已有导入目标；单独配置 examples 时通过 `find_package` 加载 SDK，并在构建后复制对应配置的 DLL |
-| `lib/cmake/DexHandPro/DexHandProConfig.cmake` | 外部工程 `find_package(DexHandPro CONFIG REQUIRED)` 的加载入口：定位头文件、Debug/Release 二进制和 DLL，定义导入目标及 `dexhandpro_deploy()` |
+| **文件**                                      | **作用**                                                                                                                                     |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CMakeLists.txt`                              | SDK 包 CMake 入口：检查编译环境、创建 `DexHandPro::dexhandpro` 导入目标、加入 examples、提供 `dexhandpro_deploy()`；不编译 `dexhandpro.dll`  |
+| `examples/CMakeLists.txt`                     | 编译并链接 SDK 示例程序。从 SDK 根目录构建时复用已有导入目标；单独配置 examples 时通过 `find_package` 加载 SDK，并在构建后复制对应配置的 DLL |
+| `lib/cmake/DexHandPro/DexHandProConfig.cmake` | 外部工程 `find_package(DexHandPro CONFIG REQUIRED)` 的加载入口：定位头文件、Release 二进制和 DLL，定义导入目标及 `dexhandpro_deploy()`       |
 
 用户工程通过 CMake package 接入：
 
@@ -167,28 +139,6 @@ CMake 文件职责：
 find_package(DexHandPro CONFIG REQUIRED)
 target_link_libraries(app PRIVATE DexHandPro::dexhandpro)
 dexhandpro_deploy(app)
-```
-
-配置时把 `CMAKE_PREFIX_PATH` 指向 SDK 根目录；IDE 和生成器不限，使用 MSVC v143 工具链即可：
-
-```powershell
-cmake -S . -B build -DCMAKE_PREFIX_PATH=<SDK 根目录>
-cmake --build build --config Debug
-cmake --build build --config Release
-```
-
-也可以直接在 SDK 根目录构建 examples：
-
-```powershell
-cmake -S . -B build
-cmake --build build --config Debug
-cmake --build build --config Release
-```
-
-完整的用户接口文档见：
-
-```text
-docs/DexHand021Pro_SDK_User_Guide.pdf
 ```
 
 ## 4. 实例创建与连接
@@ -280,9 +230,9 @@ virtual bool connect(bool listen) = 0;
 
 参数：
 
-| **参数** | **类型** | **说明**                                                |
-| -------- | -------- | ------------------------------------------------------- |
-| `listen` | `bool`   | true 时启动状态回调；false 时只建立连接，不触发状态回调 |
+| **参数** | **类型** | **说明**                                                                          |
+| -------- | -------- | --------------------------------------------------------------------------------- |
+| `listen` | `bool`   | true 时允许触发状态回调；false 时不触发。PDO、DC 与状态快照在两种情况下都正常运行 |
 
 返回：true 成功；false 失败。
 
@@ -291,6 +241,8 @@ virtual bool connect(bool listen) = 0;
 注意：
 
 - `connect()` 是阻塞操作，总线配置期间可能持续数秒
+- `listen` 只控制用户状态回调，不影响 PDO 线程和 `getHandStatus()` 快照
+- 回调还受 `setRealtimeResponse(rate, enable)` 的 `enable` 控制（默认开启）
 - 不要在状态回调或错误回调中调用 `connect()`
 - 控制连接只接受 V1.1 手板 PDO 布局
 
@@ -517,9 +469,6 @@ public:
  
     virtual bool       hasJoint(JointId joint) const = 0;
     virtual JointState joint(JointId joint) const = 0;
- 
-    virtual bool hasHall() const = 0;
-    virtual bool hasPidGain() const = 0;
 };
 ```
 
@@ -531,8 +480,6 @@ public:
 | `receiveTimestamp()` | `int64_t`    | 主站收到该帧的时间，steady_clock 微秒 |
 | `hasJoint(joint)`    | `bool`       | 关节索引是否有效                      |
 | `joint(joint)`       | `JointState` | 指定关节的状态；无效索引返回默认值    |
-| `hasHall()`          | `bool`       | PDO 是否包含 Hall 数据                |
-| `hasPidGain()`       | `bool`       | PDO 是否包含 kp/kd 数据               |
 
 `JointState` 字段：
 
@@ -688,15 +635,13 @@ struct JointTarget
 ```cpp
 struct HandCommand
 {
-    bool clearError = false;
     std::array<JointTarget, static_cast<size_t>(JointId::Count)> joints{};
 };
 ```
 
-| **字段**     | **类型**                      | **说明**                    |
-| ------------ | ----------------------------- | --------------------------- |
-| `clearError` | `bool`                        | 一次性清错请求              |
-| `joints`     | `std::array<JointTarget, 16>` | 按 `JointId` 索引的关节目标 |
+| **字段** | **类型**                      | **说明**                    |
+| -------- | ----------------------------- | --------------------------- |
+| `joints` | `std::array<JointTarget, 16>` | 按 `JointId` 索引的关节目标 |
 
 `setHandCommand()` 按整帧处理：没有使能的关节会被失能。
 
@@ -732,19 +677,37 @@ virtual bool getHandCommand(HandCommand& out) const = 0;
 ### 7.6 moveJoint
 
 ```cpp
-virtual bool moveJoint(JointId joint, const JointTarget& target) = 0;
+virtual bool moveJoint(JointId joint, const JointTarget& target,
+                       const JointTarget* coupledTarget = nullptr) = 0;
 ```
 
 功能：只更新一个关节，其它关节命令保持不变。
 
 参数：
 
-| **参数** | **类型**             | **说明**       |
-| -------- | -------------------- | -------------- |
-| `joint`  | `JointId`            | 目标关节       |
-| `target` | `const JointTarget&` | 该关节的新目标 |
+| **参数**        | **类型**             | **说明**                                                |
+| --------------- | -------------------- | ------------------------------------------------------- |
+| `joint`         | `JointId`            | 目标关节                                                |
+| `target`        | `const JointTarget&` | 该关节的新目标                                          |
+| `coupledTarget` | `const JointTarget*` | 伙伴关节目标，默认 `nullptr`；仅 MIT 模式的耦合关节需要 |
 
 返回：true 表示命令已接受。
+
+说明：
+
+- `JOINT_POS` / `THREE_LOOP`：`coupledTarget` 必须传 `nullptr`；耦合关节的伙伴由 SDK 自动保持当前角度，并沿用主关节的速度/电流/kp/kd。传入非空 `coupledTarget` 会返回失败。
+- `MIT_CTRL_MODE`：耦合关节必须给出 `coupledTarget`，否则返回失败；非耦合关节传 `nullptr`。
+- MIT 模式下，主关节和伙伴关节都会被强制使能；伙伴关节的 `kp/kd` 来自 `coupledTarget`，不会被主关节覆盖。
+
+耦合关节对：
+
+| **关节**         | **耦合伙伴**     |
+| ---------------- | ---------------- |
+| `ThumbProxSwng`  | `ThumbProxFlex`  |
+| `IndexProxSwng`  | `IndexProxFlex`  |
+| `MiddleProxSwng` | `MiddleProxFlex` |
+| `RingProxSwng`   | `RingProxFlex`   |
+| `LittleProxSwng` | `LittleProxFlex` |
 
 ### 7.7 resetJoints
 
@@ -845,7 +808,7 @@ struct PusherState
 
 `has(PusherField)` 用于判断某个 PDO 字段是否已映射。
 
-### 8.3 公共推杆模式
+### 8.3 推杆可用模式
 
 ```cpp
 enum class PusherMode : int8_t
@@ -889,7 +852,7 @@ struct PusherCommand
 | **模式** | `pos`  | `vel` | **说明**                                        |
 | -------- | ------ | ----- | ----------------------------------------------- |
 | `Csp`    | 必须   | 可选  | 目标位置；`vel=0` 时使用默认最大速度 30000 µm/s |
-| `Csv`    | 不使用 | 必须  | 目标速度；`vel=0` 表示停车                      |
+| `Csv`    | 不使用 | 必须  | 目标速度；`vel=0` 表示停止                      |
 
 ### 8.5 pusherCount
 
@@ -1300,17 +1263,7 @@ std::string errorMessage() const;
 
 ## 12. 设备操作
 
-### 12.1 clearDeviceError
-
-```cpp
-bool clearDeviceError(FingerPart part);
-```
-
-功能：清除指定 CTRL 设备的错误状态。
-
-返回：true 成功。
-
-### 12.2 restartDevice
+### 12.1 restartDevice
 
 ```cpp
 bool restartDevice(FingerPart part);
@@ -1320,34 +1273,23 @@ bool restartDevice(FingerPart part);
 
 返回：true 成功。
 
-### 12.3 setFillLight
+### 12.2 setFillLight
 
 ```cpp
-bool setFillLight(FingerPart part, uint8_t brightness);
+bool setFillLight(uint8_t brightness);
 ```
 
-功能：设置补光灯亮度。
+功能：设置四指板 EC device 的补光灯亮度。
 
 参数：
 
-| **参数**     | **类型**     | **说明**                 |
-| ------------ | ------------ | ------------------------ |
-| `part`       | `FingerPart` | 目标设备                 |
-| `brightness` | `uint8_t`    | 0 为关闭，255 为最大亮度 |
+| **参数**     | **类型**  | **说明**                 |
+| ------------ | --------- | ------------------------ |
+| `brightness` | `uint8_t` | 0 为关闭，255 为最大亮度 |
 
-返回：true 成功。
+返回：true 成功；未检测到四指板时返回 false。
 
-### 12.4 setCtrlEnable
-
-```cpp
-bool setCtrlEnable(FingerPart part, bool on);
-```
-
-功能：使能或失能指定 CTRL 设备。
-
-返回：true 成功。
-
-### 12.5 restartAllCtrl
+### 12.3 restartAllCtrl
 
 ```cpp
 bool restartAllCtrl();
@@ -1357,7 +1299,7 @@ bool restartAllCtrl();
 
 返回：true 表示全部设备重新使能成功。
 
-### 12.6 requestRestartAllEc
+### 12.4 requestRestartAllEc
 
 ```cpp
 void requestRestartAllEc();
@@ -1460,18 +1402,7 @@ enum class AdapterType : int
 | `MotorTemp1`  | 13     | 0x3006 电机温度 1   |
 | `MotorTemp2`  | 14     | 0x3007 电机温度 2   |
 
-### 13.7 FaultDomain
-
-| **值**          | **说明**        |
-| --------------- | --------------- |
-| `None`          | 未归因          |
-| `Environment`   | 运行环境        |
-| `Hardware`      | 总线 / 从站硬件 |
-| `Configuration` | 参数或配置      |
-| `Device`        | 设备侧          |
-| `Sdk`           | SDK 内部        |
-
-### 13.8 ConnectStage
+### 13.7 ConnectStage
 
 | **值**       | **说明**   |
 | ------------ | ---------- |
@@ -1504,6 +1435,7 @@ enum class AdapterType : int
 
 ## 15. 文档修订记录
 
-| **日期**   | **版本** | **说明**                                          |
-| ---------- | -------- | ------------------------------------------------- |
-| 2026-11-08 | 1.0.1    | 初版用户接口文档，覆盖 `DexHand` 与 `DexHand_Pro` |
+| **日期**   | **版本** | **说明**                                                                                   |
+| ---------- | -------- | ------------------------------------------------------------------------------------------ |
+| 2026-11-08 | 1.0.1    | 初版用户接口文档，覆盖 `DexHand` 与 `DexHand_Pro`                                          |
+| 2026-11-13 | 1.0.2    | 修改了moveJoint、setFillLight接口参数，删除了setCtrlEnable、清错接口和关节控制中的清错位。 |

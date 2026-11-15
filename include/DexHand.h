@@ -5,9 +5,9 @@
  *
  * Public: Hand / Joint / Pusher <--map--> Internal: slaves / boards / devices.
  *
- * @warning Built with MSVC v143, x64, C++20. Use the DLL that matches the
- *          consumer configuration: Debug with Debug, Release with Release.
- *          Do not mix Debug and Release binaries.
+ * @warning Built with MSVC v143, x64, C++20. Release packages ship Release
+ *          binaries only; build consumers with Release or RelWithDebInfo
+ *          (/MD). Debug (/MDd) consumers are not supported.
  * @warning One SDK instance owns one EtherCAT interface and one hand. A hand
  *          exclusively owns the bus.
  *
@@ -25,6 +25,12 @@
 #include <vector>
 
 #include "commondef.h"
+
+// The release package ships Release-only binaries. Debug builds use the debug
+// CRT and STL (_ITERATOR_DEBUG_LEVEL != 0), which are ABI-incompatible.
+#if defined(DEXHAND_RELEASE_ONLY) && defined(_ITERATOR_DEBUG_LEVEL) && (_ITERATOR_DEBUG_LEVEL != 0)
+#error "DexHandPro ships Release-only binaries. Build with Release or RelWithDebInfo (/MD), not Debug (/MDd)."
+#endif
 
 namespace DexRobot
 {
@@ -170,7 +176,7 @@ struct JointState
     int16_t angle = 0;               ///< Semantic angle, 0.01 degree; equals primary + follower for distal joints.
     int16_t velocity = 0;            ///< Motor speed, rpm.
     int16_t current = 0;             ///< Motor current, mA.
-    int16_t hall = 0;                ///< Hall value, V1.1 only.
+    int16_t hall = 0;                ///< Hall value.
 
     int16_t anglePrimary = 0;        ///< Ang0, 0.01 degree.
     int16_t angleFollower = 0;       ///< Ang1, 0.01 degree; valid when hasFollower.
@@ -206,12 +212,6 @@ public:
 
     /// @brief Joint state; returns a default state for an invalid index.
     virtual JointState joint(JointId joint) const = 0;
-
-    /// @brief True when hall data is present in the PDO layout.
-    virtual bool hasHall() const = 0;
-
-    /// @brief True when kp/kd gains are present in the PDO layout.
-    virtual bool hasPidGain() const = 0;
 };
 
 /**
@@ -285,6 +285,18 @@ struct HandDiagnostics
 };
 
 /**
+ * @brief Parsed factory serial number.
+ *
+ * The SDK decodes the stored value; text is empty when the value is
+ * unprogrammed or out of range.
+ */
+struct SerialNumber
+{
+    bool        valid = false;  ///< Stored value is a valid factory serial.
+    std::string text;           ///< DX022-S-L-M-YYYYMMDDNNNN; empty when !valid.
+};
+
+/**
  * @brief EC board information read through SDO.
  */
 struct EcInfo
@@ -296,7 +308,8 @@ struct EcInfo
     uint16_t   bootVer = 0;               ///< Raw boot version; decode with decodeVersion().
     uint16_t   hwVer = 0;                 ///< Raw hardware version.
     uint16_t   testTime = 0;              ///< Raw test timestamp.
-    uint32_t   sn = 0;                    ///< EC serial number.
+    uint32_t   sn = 0;                    ///< Raw EC serial number.
+    SerialNumber serial;                  ///< Decoded sn; valid=false when unprogrammed.
     uint16_t   status = 0;                ///< EC status word.
     int16_t    curTemp = 0;               ///< Current temperature, 0.01 Celsius.
     bool       adminOn = false;           ///< Admin mode is active.
@@ -315,7 +328,8 @@ struct DeviceInfo
     uint16_t testTime = 0;                ///< Raw test timestamp.
     uint32_t appLen = 0;                  ///< Application image length.
     uint32_t appCrc = 0;                  ///< Application image CRC.
-    uint32_t sn = 0;                      ///< Device serial number.
+    uint32_t sn = 0;                      ///< Raw device serial number.
+    SerialNumber serial;                  ///< Decoded sn; valid=false when unprogrammed.
     uint16_t status = 0;                  ///< Device status word.
     int16_t  curTemp = 0;                 ///< Current temperature, 0.01 Celsius.
     uint16_t procTemp = 0;                ///< Protection temperature, 0.01 Celsius.
@@ -377,7 +391,7 @@ struct FirmwareVersion
          + std::to_string(version.patch);
 }
 
-/// @brief Whole-SDK version string, e.g. "1.0.1".
+/// @brief Whole-SDK version string, e.g. "1.0.2".
 DEXHAND_API const char* sdkVersion();
 
 /**
@@ -401,7 +415,6 @@ struct JointTarget
  */
 struct HandCommand
 {
-    bool clearError = false;   ///< Request a one-shot error clear.
     std::array<JointTarget, static_cast<size_t>(JointId::Count)> joints{}; ///< Indexed by JointId.
 };
 
@@ -426,7 +439,7 @@ struct PusherState
     bool online = false;          ///< Pusher slave is online.
     bool enabled = false;         ///< Drive is operation-enabled.
     bool fault = false;           ///< Drive fault bit.
-    bool targetReached = false;   ///< Drive target-reached bit.
+    bool targetReached = false;   ///< Raw DS402 statusword bit 10; not asserted by every drive.
 
     uint32_t mapped = 0;          ///< PusherField bitmask of mapped PDO fields.
 
@@ -523,7 +536,8 @@ public:
      * Opens the interface, configures slaves, maps PDOs, enables DC/PDO, and
      * enters OP. Only V1.1 hand firmware is accepted.
      *
-     * @param listen Start status callbacks immediately when true.
+     * @param listen Allow status callbacks when true. PDO, DC and snapshots
+     *               run either way; getHandStatus() is unaffected.
      * @return true on success; false on failure.
      * @note Blocks while the bus is configured. Do not call from a callback.
      * @note On failure, read errorCode()/errorMessage().
@@ -580,8 +594,8 @@ public:
 
     /**
      * @brief Set status callback rate and enable state.
-     * @param rateHz Callback rate, Hz.
-     * @param enable Enable or disable callbacks.
+     * @param rateHz Callback rate, clamped to [100, 1000] Hz.
+     * @param enable Enable or disable callbacks; the same flag as listen().
      * @return true on success; false when unsupported.
      */
     virtual bool setRealtimeResponse(uint16_t rateHz, bool enable)
@@ -618,10 +632,17 @@ public:
      * @brief Update one joint target, leaving other joints unchanged.
      * @param joint Joint to update.
      * @param target New target for that joint.
+     * @param coupledTarget Partner target for a coupled joint in MIT mode;
+     *                      the partner's own kp/kd come from this struct.
+     *                      Required for coupled joints in MIT mode; must be
+     *                      null in the other modes.
      * @return true when accepted.
-     * @note Coupled partner joints are handled automatically.
+     * @note JOINT_POS/THREE_LOOP hold the coupled partner at its current
+     *       angle automatically. MIT_CTRL_MODE requires an explicit partner
+     *       target for coupled joints.
      */
-    DEXHAND_API virtual bool moveJoint(JointId joint, const JointTarget& target) = 0;
+    DEXHAND_API virtual bool moveJoint(JointId joint, const JointTarget& target,
+                                       const JointTarget* coupledTarget = nullptr) = 0;
 
     /// @brief Zero torque and disable all joints.
     DEXHAND_API virtual bool emergencyStop() = 0;
@@ -629,6 +650,8 @@ public:
     /**
      * @brief Start or stop status callbacks.
      * @param enable true to start callbacks; false to stop them.
+     * @note Shares the enable flag with setRealtimeResponse(); the last call
+     *       wins and the configured callback rate is kept.
      * @note PDO and snapshots continue while callbacks are stopped.
      */
     DEXHAND_API void listen(bool enable) const;
@@ -720,7 +743,8 @@ public:
     DEXHAND_API bool getHandCommand(HandCommand& out) const override;
 
     /// @copydoc DexHand::moveJoint
-    DEXHAND_API bool moveJoint(JointId joint, const JointTarget& target) override;
+    DEXHAND_API bool moveJoint(JointId joint, const JointTarget& target,
+                               const JointTarget* coupledTarget = nullptr) override;
 
     /**
      * @brief Zero torque and disable all joints.
@@ -807,13 +831,6 @@ public:
     DEXHAND_API bool readDeviceInfo(FingerPart part, DeviceInfo& out);
 
     /**
-     * @brief Clear a CTRL device error.
-     * @param part Device to clear.
-     * @return true on success.
-     */
-    DEXHAND_API bool clearDeviceError(FingerPart part);
-
-    /**
      * @brief Restart one CTRL device.
      * @param part Device to restart.
      * @return true on success.
@@ -821,20 +838,11 @@ public:
     DEXHAND_API bool restartDevice(FingerPart part);
 
     /**
-     * @brief Set fill-light brightness.
-     * @param part Device to configure.
+     * @brief Set fill-light brightness on the four-finger board EC device.
      * @param brightness 0=off, 255=maximum.
-     * @return true on success.
+     * @return true on success; false when the four-finger board is absent.
      */
-    DEXHAND_API bool setFillLight(FingerPart part, uint8_t brightness);
-
-    /**
-     * @brief Enable or disable one CTRL device.
-     * @param part Device to configure.
-     * @param on true to enable.
-     * @return true on success.
-     */
-    DEXHAND_API bool setCtrlEnable(FingerPart part, bool on);
+    DEXHAND_API bool setFillLight(uint8_t brightness);
 
     /**
      * @brief Disable and re-enable all CTRL devices.
@@ -858,6 +866,8 @@ public:
      * @param pusher Pusher index.
      * @param out Receives the snapshot.
      * @return true on success.
+     * @note The snapshot is updated by the PDO thread. Poll until
+     *       PusherState::online is true before using pos or issuing commands.
      */
     DEXHAND_API bool getPusherStatus(PusherId pusher, PusherState& out) const;
 

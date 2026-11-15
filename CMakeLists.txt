@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 # Standalone prebuilt SDK package.
 # Headers: include/
-# Binaries: lib/windows/{Debug,Release}
+# Binaries: lib/windows/ (Release only, no Debug, no PDB)
 # Examples: examples/
 project(dexhandpro_sdk VERSION 1.0.1 LANGUAGES CXX)
 
@@ -34,14 +34,12 @@ set(DEXPRO_ROOT       "${CMAKE_CURRENT_SOURCE_DIR}")
 set(DEXPRO_INCLUDE   "${DEXPRO_ROOT}/include")
 set(DEXPRO_LIB_DIR   "${DEXPRO_ROOT}/lib/windows")
 
-foreach(config Debug Release)
-    if(NOT EXISTS "${DEXPRO_LIB_DIR}/${config}/dexhandpro.dll")
-        message(FATAL_ERROR "Missing ${config} runtime: ${DEXPRO_LIB_DIR}/${config}/dexhandpro.dll")
-    endif()
-    if(NOT EXISTS "${DEXPRO_LIB_DIR}/${config}/dexhandpro.lib")
-        message(FATAL_ERROR "Missing ${config} import library: ${DEXPRO_LIB_DIR}/${config}/dexhandpro.lib")
-    endif()
-endforeach()
+if(NOT EXISTS "${DEXPRO_LIB_DIR}/dexhandpro.dll")
+    message(FATAL_ERROR "Missing release runtime: ${DEXPRO_LIB_DIR}/dexhandpro.dll")
+endif()
+if(NOT EXISTS "${DEXPRO_LIB_DIR}/dexhandpro.lib")
+    message(FATAL_ERROR "Missing release import library: ${DEXPRO_LIB_DIR}/dexhandpro.lib")
+endif()
 
 # ---------------------------------------------------------------------------
 # Imported target used by examples in this tree.
@@ -50,18 +48,16 @@ if(NOT TARGET DexHandPro::dexhandpro)
     add_library(DexHandPro::dexhandpro SHARED IMPORTED)
 
     set_target_properties(DexHandPro::dexhandpro PROPERTIES
-        IMPORTED_CONFIGURATIONS "Debug;Release"
-        IMPORTED_LOCATION_DEBUG   "${DEXPRO_LIB_DIR}/Debug/dexhandpro.dll"
-        IMPORTED_IMPLIB_DEBUG     "${DEXPRO_LIB_DIR}/Debug/dexhandpro.lib"
-        IMPORTED_LOCATION_RELEASE "${DEXPRO_LIB_DIR}/Release/dexhandpro.dll"
-        IMPORTED_IMPLIB_RELEASE   "${DEXPRO_LIB_DIR}/Release/dexhandpro.lib"
+        IMPORTED_CONFIGURATIONS "Release"
+        IMPORTED_LOCATION_RELEASE "${DEXPRO_LIB_DIR}/dexhandpro.dll"
+        IMPORTED_IMPLIB_RELEASE   "${DEXPRO_LIB_DIR}/dexhandpro.lib"
 
         MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release
         MAP_IMPORTED_CONFIG_MINSIZEREL     Release
 
         INTERFACE_INCLUDE_DIRECTORIES "${DEXPRO_INCLUDE}"
         INTERFACE_COMPILE_FEATURES    cxx_std_20
-        INTERFACE_COMPILE_DEFINITIONS "NOMINMAX;_CRT_SECURE_NO_WARNINGS")
+        INTERFACE_COMPILE_DEFINITIONS "NOMINMAX;_CRT_SECURE_NO_WARNINGS;DEXHAND_RELEASE_ONLY")
 
     set_property(TARGET DexHandPro::dexhandpro PROPERTY IMPORTED_GLOBAL TRUE)
 endif()
@@ -70,7 +66,7 @@ if(NOT TARGET dexhandpro)
     add_library(dexhandpro ALIAS DexHandPro::dexhandpro)
 endif()
 
-# Copy the DLL matching the consumer configuration next to the target.
+# Copy the Release DLL next to the target.
 if(NOT COMMAND dexhandpro_deploy)
     function(dexhandpro_deploy target)
         if(NOT TARGET "${target}")
