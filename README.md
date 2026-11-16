@@ -57,31 +57,51 @@ SDK 对外提供 16 个语义关节：
 
 ### 3.1 环境要求
 
-| **项目** | **要求**                                           |
-| -------- | -------------------------------------------------- |
-| 操作系统 | Windows 10/11 x64                                  |
-| 编译器   | MSVC v143                                          |
-| C++ 标准 | C++20                                              |
-| 网络依赖 | Npcap（需单独安装，不随本 SDK 分发）               |
-| 运行库   | Microsoft Visual C++ 2015–2022 x64 Redistributable |
+| **项目** | **要求**                                                                    |
+| -------- | --------------------------------------------------------------------------- |
+| 操作系统 | Windows 10/11 x64；Ubuntu 22.04 / 24.04 x86_64                              |
+| 编译器   | Windows：MSVC v143；Linux：GCC 11+（或使用兼容 libstdc++ 的 Clang）         |
+| C++ 标准 | C++20                                                                       |
+| 网络依赖 | Windows：Npcap（需单独安装）；Linux：无额外依赖（raw socket）               |
+| 运行库   | Windows：Microsoft Visual C++ 2015–2022 x64 Redistributable；Linux：libstdc++ |
 
-运行前请确认：
+**Windows 运行前请确认：**
 
 - 已从 Npcap 官方渠道安装 Npcap，并勾选 **WinPcap API 兼容模式**。Npcap 不随本 SDK 分发。
 - 已安装 **Microsoft Visual C++ 2015–2022 x64 Redistributable**。
+- Npcap 默认仅允许管理员访问网卡，因此运行本 SDK 的程序通常需要以管理员权限启动。
 
-Npcap 默认仅允许管理员访问网卡，因此运行本 SDK 的程序通常需要以管理员权限启动。
+**Ubuntu 运行前请确认：**
+
+- 进程需要 **root** 或 `CAP_NET_RAW` 才能打开 EtherCAT 网口；
+- EtherCAT 网口应独占使用，不要配置 IP，并避免 NetworkManager 接管：
+
+- 可以用 `setcap` 给程序单独授权，避免每次使用 sudo：
+```bash
+sudo setcap cap_net_raw,cap_sys_nice+ep ./build/bin/Release/hand_status_demo
+```
+
+- 非 root 且未授权时，`scanDexInterfaces()` / `scan_dex_interfaces()` 会返回空列表，而不是抛出异常。
 
 ### 3.2 仅提供 Release 版本
 
-SDK 只提供 Release 版 `dexhandpro.dll` / `dexhandpro.lib`，不提供 Debug 版，也不提供 PDB。
+SDK 只提供 Release 版二进制，不提供 Debug 版：
+
+- Windows：`dexhandpro.dll` / `dexhandpro.lib`，不提供 PDB；
+- Linux：`libdexhandpro.so`。
+
+**Windows / MSVC：**
 
 SDK 的公开接口包含 C++ 标准库类型。MSVC 的 Debug 配置使用调试版 CRT 与 STL（`/MDd`，`_ITERATOR_DEBUG_LEVEL=2`），与 Release DLL 的 ABI 不兼容。因此：
 
 - 客户工程必须使用 **Release** 或 **RelWithDebInfo** 构建，二者都使用发布版 CRT（`/MD`）；
 - 通过本 SDK 的 CMake 包接入时，使用 **Debug** 配置编译会直接在 `DexHand.h` 报错并提示改用 Release/RelWithDebInfo；手动配置 include/lib 的工程请自行确保使用 `/MD`；
-- `RelWithDebInfo` 保留调试符号，可以正常调试客户自己的代码；
-- SDK 不提供 PDB，无法单步进入 SDK 内部实现。
+
+**Linux / GCC：**
+
+- 客户工程建议使用 Release 或 RelWithDebInfo；
+- SDK 使用 GCC 11.4 / libstdc++（`GLIBCXX_3.4.29`）构建，编译器版本不应低于 GCC 11；
+- 不要在客户工程中定义 `_GLIBCXX_DEBUG`，libstdc++ 调试模式会改变 STL 布局，与 SDK 不兼容。
 
 ### 3.3 初始化顺序
 
@@ -103,18 +123,18 @@ scanInterfaces / scanDexInterfaces
 SDK 根目录结构：
 
 ```text
-DexProEC_SDK_CPP/
+dexhandpro_ec_sdk_cpp/
 ├── CMakeLists.txt
-├── docs/
-│   └── DexHand021Pro_SDK_User_Guide.pdf
 ├── include/
 │   ├── DexHand.h
 │   ├── commondef.h
 │   └── DateTimeUtils.h
-├── lib/
+├── libs/
 │   ├── windows/
 │   │   ├── dexhandpro.dll
 │   │   └── dexhandpro.lib
+│   ├── linux/
+│   │   └── libdexhandpro.so
 │   └── cmake/
 │       └── DexHandPro/
 │           └── DexHandProConfig.cmake
@@ -127,11 +147,27 @@ DexProEC_SDK_CPP/
 
 CMake 文件职责：
 
-| **文件**                                      | **作用**                                                                                                                                     |
-| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CMakeLists.txt`                              | SDK 包 CMake 入口：检查编译环境、创建 `DexHandPro::dexhandpro` 导入目标、加入 examples、提供 `dexhandpro_deploy()`；不编译 `dexhandpro.dll`  |
-| `examples/CMakeLists.txt`                     | 编译并链接 SDK 示例程序。从 SDK 根目录构建时复用已有导入目标；单独配置 examples 时通过 `find_package` 加载 SDK，并在构建后复制对应配置的 DLL |
-| `lib/cmake/DexHandPro/DexHandProConfig.cmake` | 外部工程 `find_package(DexHandPro CONFIG REQUIRED)` 的加载入口：定位头文件、Release 二进制和 DLL，定义导入目标及 `dexhandpro_deploy()`       |
+| **文件**                                       | **作用**                                                                                                                                          |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CMakeLists.txt`                               | SDK 包 CMake 入口：检查编译环境（Windows 要求 MSVC v143）、按平台创建 `DexHandPro::dexhandpro` 导入目标、加入 examples、提供 `dexhandpro_deploy()`；不编译 SDK 本体 |
+| `examples/CMakeLists.txt`                      | 编译并链接 SDK 示例程序。从 SDK 根目录构建时复用已有导入目标；单独配置 examples 时通过 `find_package` 加载 SDK，并在构建后复制对应平台的 Release 运行库 |
+| `libs/cmake/DexHandPro/DexHandProConfig.cmake` | 外部工程 `find_package(DexHandPro CONFIG REQUIRED)` 的加载入口：定位头文件与当前平台 Release 二进制，定义导入目标及 `dexhandpro_deploy()`        |
+
+包内示例构建：
+
+```bash
+# Linux
+cmake -S . -B build -G Ninja
+cmake --build build -j
+sudo ./build/bin/Release/hand_status_demo
+```
+
+```powershell
+# Windows
+cmake -S . -B build
+cmake --build build --config Release
+.\build\bin\Release\hand_status_demo.exe
+```
 
 用户工程通过 CMake package 接入：
 
@@ -294,7 +330,7 @@ virtual ProductType productType() const = 0;
 const char* sdkVersion();
 ```
 
-返回：SDK 版本字符串，例如 `"1.0.1"`。
+返回：SDK 版本字符串，例如 `"1.0.2"`。
 
 ### 4.11 getHandInfo
 
@@ -697,11 +733,11 @@ virtual bool moveJoint(JointId joint, const JointTarget& target,
 
 - `JOINT_POS` / `THREE_LOOP`：`coupledTarget` 必须传 `nullptr`；耦合关节的伙伴由 SDK 自动保持当前角度，并沿用主关节的速度/电流/kp/kd。传入非空 `coupledTarget` 会返回失败。
 - `MIT_CTRL_MODE`：耦合关节必须给出 `coupledTarget`，否则返回失败；非耦合关节传 `nullptr`。
-- MIT 模式下，主关节和伙伴关节都会被强制使能；伙伴关节的 `kp/kd` 来自 `coupledTarget`，不会被主关节覆盖。
+- `MIT` 模式下，主关节和伙伴关节都会被强制使能；伙伴关节的 `kp/kd` 来自 `coupledTarget`，不会被主关节覆盖。
 
 耦合关节对：
 
-| **关节**         | **耦合伙伴**     |
+| **关节**         | **耦合关节**     |
 | ---------------- | ---------------- |
 | `ThumbProxSwng`  | `ThumbProxFlex`  |
 | `IndexProxSwng`  | `IndexProxFlex`  |
@@ -1078,7 +1114,8 @@ bool readEcInfo(std::vector<EcInfo>& out);
 | `bootVer`  | `uint16_t`   | 原始 Boot 版本                            |
 | `hwVer`    | `uint16_t`   | 硬件版本                                  |
 | `testTime` | `uint16_t`   | 测试时间                                  |
-| `sn`       | `uint32_t`   | EC 序列号                                 |
+| `sn`       | `uint32_t`     | EC 序列号原始值                           |
+| `serial`   | `SerialNumber` | 解码后的序列号；`valid=false` 表示未写入 |
 | `status`   | `uint16_t`   | EC 状态字                                 |
 | `curTemp`  | `int16_t`    | 当前温度，0.01℃                           |
 | `adminOn`  | `bool`       | Admin 模式                                |
@@ -1103,7 +1140,8 @@ bool readDeviceInfo(FingerPart part, DeviceInfo& out);
 | `testTime`    | `uint16_t` | 测试时间        |
 | `appLen`      | `uint32_t` | 应用镜像长度    |
 | `appCrc`      | `uint32_t` | 应用镜像 CRC    |
-| `sn`          | `uint32_t` | 设备序列号      |
+| `sn`          | `uint32_t` | 设备序列号原始值 |
+| `serial`      | `SerialNumber` | 解码后的序列号；`valid=false` 表示未写入 |
 | `status`      | `uint16_t` | 设备状态字      |
 | `curTemp`     | `int16_t`  | 当前温度，0.01℃ |
 | `procTemp`    | `uint16_t` | 保护温度，0.01℃ |
@@ -1115,6 +1153,15 @@ bool readDeviceInfo(FingerPart part, DeviceInfo& out);
 | `ratedCur`    | `uint16_t` | 额定电流        |
 | `ratedRpm`    | `uint16_t` | 额定转速        |
 | `ratedTemp`   | `uint16_t` | 额定温度        |
+
+`SerialNumber` 字段：
+
+| **字段** | **类型**      | **说明**                                                 |
+| -------- | ------------- | -------------------------------------------------------- |
+| `valid`  | `bool`        | 序列号是否有效                                           |
+| `text`   | `std::string` | 文本形式 `DX022-S-L-M-YYYYMMDDNNNN`；`valid=false` 时为空 |
+
+序列号由原始 `sn` 解码得到。出现以下情况时 `valid=false`：原始值为 0、版本/电机类型字段不符、月日越界、或日期不存在。
 
 ## 10. 触觉
 
@@ -1439,3 +1486,4 @@ enum class AdapterType : int
 | ---------- | -------- | ------------------------------------------------------------------------------------------ |
 | 2026-11-08 | 1.0.1    | 初版用户接口文档，覆盖 `DexHand` 与 `DexHand_Pro`                                          |
 | 2026-11-13 | 1.0.2    | 修改了moveJoint、setFillLight接口参数，删除了setCtrlEnable、清错接口和关节控制中的清错位。 |
+| 2026-11-15 | 1.0.2    | 增加 Ubuntu 支持：`libs/` 平台化库目录、Linux 权限与网卡配置、CMake 接入方式、序列号字段说明。 |

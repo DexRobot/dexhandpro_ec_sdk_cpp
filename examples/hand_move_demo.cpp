@@ -29,8 +29,8 @@ DexHand::PTR createHand()
     {
         std::printf("No adapter with EtherCAT slaves found.\n"
             "  - check the hand is powered and the cable is connected\n"
-            "  - if windows please check Npcap is installed with WinPcap API compatible mode\n"
-            "  - if ubuntu please run this program as Administrator\n");
+            "  - Windows: install Npcap (WinPcap API compatible mode) and run as Administrator\n"
+            "  - Linux: run as root or grant CAP_NET_RAW to this program\n");
         return nullptr;
     }
 
